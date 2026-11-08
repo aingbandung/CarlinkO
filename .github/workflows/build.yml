@@ -1,0 +1,63 @@
+name: Patch and sign CarlinkO
+
+# Put the six ORIGINAL CarlinkO APKs in originals/ (base.apk + split_config.*.apk)
+# and run this workflow. It applies patch/patch_carlinko.py to the arm64 split,
+# re-signs every APK with one generated key, and uploads them as an artifact.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "originals/**"
+      - "patch/**"
+      - ".github/workflows/build.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Check originals exist
+        run: |
+          set -e
+          test -d originals || { echo "Create an originals/ folder with the 6 original APKs."; exit 1; }
+          ls -la originals
+          test -f originals/split_config.arm64_v8a.apk
+
+      - name: Patch arm64 split
+        run: |
+          set -e
+          mkdir -p staging
+          cp originals/*.apk staging/
+          python3 patch/patch_carlinko.py originals/split_config.arm64_v8a.apk staging/split_config.arm64_v8a.apk
+
+      - name: Download uber-apk-signer
+        run: |
+          curl -sSL -o uber-apk-signer.jar \
+            https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar
+
+      - name: Generate key
+        run: |
+          keytool -genkeypair -keystore mod.jks -alias mod -keyalg RSA -keysize 2048 \
+            -validity 10000 -storepass carlinkomod -keypass carlinkomod \
+            -dname "CN=CarlinkO Mod, O=aingbandung"
+
+      - name: Sign all APKs with one key
+        run: |
+          mkdir -p dist
+          java -jar uber-apk-signer.jar -a staging -o dist --allowResign \
+            --ks mod.jks --ksAlias mod --ksPass carlinkomod --ksKeyPass carlinkomod
+          ls -la dist
+
+      - name: Upload signed APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: carlinko-vehicle-location-mod
+          path: dist/*.apk
